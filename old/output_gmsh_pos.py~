@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+
+# Nlapの要素データ(ft17), 節点データ(ft16)を読み込んで、gmshのpost viewを用いて
+
+# View "To Next Node" {
+# VP(   1,   1,  0){    0.1, 0.1,  0};
+# };
+# last updated: Wed Sep 21 08:58:31     2016
+
+import sys, os
+import re
+import math
+import nlap_node_elm
+
+
+if len(sys.argv) <= 4:
+    sys.stderr.write("{0:s} [nlap_elm.ft17]  [nlap_node.ft16] [output_elm_file] [output_file]\n".format(sys.argv[0]))
+    exit(0)
+
+inp_elem = sys.argv[1]
+inp_node = sys.argv[2]
+inp_output_elms = sys.argv[3]
+output = sys.argv[4]
+
+# set elems to be output
+fin = open(inp_output_elms, "r", encoding="utf-8")
+pline_elms = []
+for e in fin:
+    if re.match("^ *[0-9]+ *$", e):
+        pline_elms.append(e)
+
+fin.close()
+
+print("inp_node  = {:<}".format(inp_node))
+print("inp_elem  = {:<}".format(inp_elem))
+print("inp_output_elms = {:<}".format(inp_output_elms))
+print("output_file     = {:<}".format(output))
+
+nlap = nlap_node_elm.Nlap()
+
+node = nlap.read_node_data(inp_node)
+element = nlap.read_element_data(inp_elem)
+
+fout = open(output, "w", encoding="utf=8")
+
+# header
+fout.write('View "Element Connection" {\n')
+
+for e in pline_elms:
+    node_ijkl = element[int(e)]['node']
+    
+    # 節点のXY座標
+    xy = []
+    # 要素の平均座標
+    mean_xy = []
+    sum_x = 0.0
+    sum_y = 0.0
+    counter = 0
+    for n in node_ijkl:
+        if n == 0:
+            continue
+        
+        counter += 1
+        x = node[n]['x']
+        y = node[n]['y']
+        xy.append({'x':x, 'y':y})
+
+        sum_x += x
+        sum_y += y
+
+        
+    mean_xy = {'x': sum_x / counter, 'y': sum_y / counter}
+
+    # output
+    coord_from_x = ''
+    coord_from_y = ''
+    fout.write("//elem {0:d}\n".format(int(e)))
+
+    factor = 1.0
+    counter = 0
+    dx_center = 0.0
+    dy_center = 0.0
+    
+    for coord in xy:
+        if coord_from_x == '' and coord_from_y == '':
+            coord_start_x = coord['x']
+            coord_start_y = coord['y']
+        else:
+            command = "VP"
+            fout.write("{0:s}".format(command))
+
+            # 要素の少し内側に記述する
+            dx_center = mean_xy['x'] - coord_from_x
+            dy_center = mean_xy['y'] - coord_from_y
+            norm = math.sqrt(dx_center * dx_center + dy_center * dy_center)
+            shift_factor = 0.2
+            shifted_x = coord_from_x + shift_factor * norm * dx_center
+            shifted_y = coord_from_y + shift_factor * norm * dy_center
+            fout.write("({0:f},{1:f},0)".format(shifted_x, shifted_y))
+            dx = (coord['x'] - coord_from_x) * factor
+            dy = (coord['y'] - coord_from_y) * factor
+            fout.write('{')
+            fout.write("{0:f},{1:f},0".format(dx, dy))
+            fout.write('};\n')
+
+            # nodal number
+            command = "T3"
+            alignment = 0
+            fout.write("{0:s}".format(command))
+            fout.write("({0:f},{1:f},0,{2:d})".format(shifted_x, shifted_y, alignment))
+            fout.write('{"')
+            fout.write("{0:d}:{1:d}".format(counter, node_ijkl[counter]))
+            fout.write('"};\n')
+            counter += 1
+
+            
+        coord_from_x = coord['x']
+        coord_from_y = coord['y']
+
+    # end of segments
+    command = "VP"
+    fout.write("{0:s}".format(command))
+    dx_center = mean_xy['x'] - coord_from_x
+    dy_center = mean_xy['y'] - coord_from_y
+    norm = math.sqrt(dx_center * dx_center + dy_center * dy_center)
+    shift_factor = 0.2
+    shifted_x = coord_from_x + shift_factor * norm * dx_center
+    shifted_y = coord_from_y + shift_factor * norm * dy_center
+    fout.write("({0:f},{1:f},0)".format(shifted_x, shifted_y))
+    dx = (coord_start_x - coord_from_x) * factor
+    dy = (coord_start_y - coord_from_y) * factor
+    fout.write('{')
+    fout.write("{0:f},{1:f},0".format(dx, dy))
+    fout.write('};\n')
+        
+    # nodal number
+    command = "T3"
+    alignment = 0
+    fout.write("{0:s}".format(command))
+    fout.write("({0:f},{1:f},0,{2:d})".format(shifted_x, shifted_y, alignment))
+    fout.write('{"')
+    fout.write("{0:d}:{1:d}".format(counter, node_ijkl[counter]))
+    fout.write('"};\n')
+
+# End of View
+fout.write('};\n')
+
+fout.close()
